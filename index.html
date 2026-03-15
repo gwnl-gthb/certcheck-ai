@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X.509 Compliance Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script type="module" src="cert-parser.js"></script>
+    <style>
+        #parsingOutput::-webkit-scrollbar { width: 6px; }
+        #parsingOutput::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        /*
+        details[open] > summary i[data-lucide="chevron-right"] { transform: rotate(90deg); }
+        summary i { transition: transform 0.2s ease; }
+        */
+        /* Animation du chevron */
+        details > summary i[data-lucide="chevron-right"] {
+            transition: transform 0.2s ease-in-out;
+        }
+        details[open] > summary i[data-lucide="chevron-right"] {
+            transform: rotate(90deg);
+        }
+
+        /* Scrollbar personnalisée pour le code JSON */
+        #jsonContent::-webkit-scrollbar { width: 8px; }
+        #jsonContent::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans leading-normal">
+
+    <header class="bg-white border-b border-gray-200 p-4 sticky top-0 z-10 shadow-sm">
+        <div class="max-w-full mx-auto flex flex-wrap items-center justify-between gap-4">
+            
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-inner">
+                    CP
+                </div>
+                <h1 class="text-xl font-bold hidden md:block tracking-tight">CertCheck <span class="text-blue-600">AI</span></h1>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <select id="apiProvider" class="border rounded-md px-3 py-2 bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                    <option value="anthropic">Anthropic (Claude-sonnet-4-6)</option>
+                    <option value="openai">OpenAI (GPT-4o) -- Pas implémenté</option>
+                    <option value="google">Google (Gemini 1.5) -- Pas implémenté</option>
+                    <option value="mistral">Mistral AI -- Pas implémenté</option>
+                </select>
+                <input type="password" id="apiKey" placeholder="Clé API (locale uniquement)" class="border rounded-md px-3 py-2 w-48 focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="flex items-center gap-1">
+                    <label for="certFile" class="cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-2 rounded-md border border-blue-200 text-sm font-medium transition-colors">
+                        📄 Certificats (.pem)
+                    </label>
+                    <input type="file" id="certFile" class="hidden" multiple accept=".pem,.crt,.cer">
+                </div>
+                
+                <div class="flex items-center gap-1">
+                    <label for="pcFile" class="cursor-pointer bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-2 rounded-md border border-emerald-200 text-sm font-medium transition-colors">
+                        📚 PC / DPC (.pdf)
+                    </label>
+                    <input type="file" id="pcFile" class="hidden" accept=".pdf">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="p-6 max-w-full mx-auto">
+        <div class="flex justify-center mb-6">
+            <button id="runAnalysis" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full shadow-lg flex items-center gap-2 transform hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                <span>Lancer l'analyse de conformité</span>
+                <i data-lucide="play-circle" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-220px)]">
+            
+            <div class="bg-white rounded-xl shadow-md border border-gray-200 flex flex-col overflow-hidden">
+                <div class="bg-gray-100 p-3 border-b border-gray-200 flex justify-between items-center">
+                    <h2 class="font-semibold flex items-center gap-2">
+                        <i data-lucide="code" class="w-4 h-4"></i> Données JSON du Certificat
+                    </h2>
+                    <span id="certStatus" class="text-xs text-gray-500 italic uppercase">En attente...</span>
+                </div>
+                <div class="bg-white rounded-xl shadow-md border border-gray-200 flex flex-col overflow-hidden">
+                    <div class="bg-gray-100 p-3 border-b border-gray-200 flex justify-between items-center">
+                        <h2 class="font-semibold flex items-center gap-2">
+                            <i data-lucide="code" class="w-4 h-4"></i> Analyse Technique
+                        </h2>
+                        <div class="flex gap-2">
+                            <button onclick="toggleAll(true)" class="p-1 hover:bg-gray-200 rounded" title="Tout déplier">
+                                <i data-lucide="unfold-vertical" class="w-4 h-4 text-gray-600"></i>
+                            </button>
+                            <button onclick="toggleAll(false)" class="p-1 hover:bg-gray-200 rounded" title="Tout replier">
+                                <i data-lucide="fold-vertical" class="w-4 h-4 text-gray-600"></i>
+                            </button>
+                            <button onclick="showJsonModal()" class="ml-2 px-2 py-1 bg-gray-800 text-white text-[10px] rounded hover:bg-black transition-colors flex items-center gap-1">
+                                <i data-lucide="braces" class="w-3 h-3"></i> JSON
+                            </button>
+                        </div>
+                    </div>
+                    <div id="parsingOutput" class="p-4 overflow-y-auto text-sm flex-1 bg-gray-50 relative">
+                        <p class="text-gray-400 italic text-center mt-10">Chargez un certificat pour commencer...</p>
+                    </div>
+                </div>
+
+                <div id="jsonModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-10">
+                    <div class="bg-gray-900 w-full max-w-5xl h-full rounded-xl flex flex-col shadow-2xl border border-gray-700">
+                        <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+                            <span class="text-green-400 font-mono text-sm">RAW_DATA.JSON</span>
+                            <button onclick="hideJsonModal()" class="text-gray-400 hover:text-white">
+                                <i data-lucide="x-circle" class="w-6 h-6"></i>
+                            </button>
+                        </div>
+                        <pre id="jsonContent" class="p-6 overflow-auto text-green-500 font-mono text-[11px] flex-1"></pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-md border border-gray-200 flex flex-col overflow-hidden">
+                <div class="bg-gray-800 p-3 border-b border-gray-200 flex justify-between items-center text-white">
+                    <h2 class="font-semibold flex items-center gap-2">
+                        <i data-lucide="bot" class="w-4 h-4 text-blue-400"></i> Analyse de Conformité (IA)
+                    </h2>
+                    <div id="loadingSpinner" class="hidden animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                </div>
+                <div id="aiOutput" class="p-4 overflow-y-auto flex-1 prose prose-blue max-w-none">
+                    <p class="text-gray-400 italic">Les résultats de l'analyse IA s'afficheront ici après avoir cliqué sur le bouton.</p>
+                    </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Initialisation des icônes
+        lucide.createIcons();
+        
+        // Petite interaction pour montrer la sélection de fichier
+        document.getElementById('certFile').addEventListener('change', e => {
+            const count = e.target.files.length;
+            document.getElementById('certStatus').innerText = `${count} certificat(s) chargé(s)`;
+        });
+    </script>
+
+    <script>
+        // --- VARIABLES GLOBALES POUR L'IA ---
+        let pdfTextContent = "";
+
+        // Initialisation sécurisée des icônes
+        window.addEventListener('load', () => {
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        });
+
+        // 1. GESTION DES CERTIFICATS (.PEM)
+        document.getElementById('certFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const jsonResult = await window.parseCertificate(event.target.result);
+                    const output = document.getElementById('parsingOutput');
+                    output.innerHTML = ""; 
+
+                    jsonResult.forEach(rootNode => {
+                        output.appendChild(window.renderNode(rootNode));
+                    });
+                    
+                    document.getElementById('certStatus').innerText = "Certificat décodé avec succès";
+                    lucide.createIcons(); 
+                } catch (err) {
+                    console.error(err);
+                    alert("Erreur de décodage : " + err.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // 2. GESTION DU PDF (PC/DPC)
+        document.getElementById('pcFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function() {
+                const typedarray = new Uint8Array(this.result);
+                
+                try {
+                    // Initialisation de PDF.js
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    
+                    // Demande des pages à l'utilisateur
+                    const range = prompt(`Le PDF contient ${pdf.numPages} pages.\n\nEntrez les numéros de pages contenant les définitions de profils (ex: 52-58 ou 52,55,60) :`);
+                    
+                    if (!range) return;
+
+                    const pagesToExtract = parsePageRange(range, pdf.numPages);
+                    let extractedText = "";
+
+                    document.getElementById('certStatus').innerText = "Extraction du PDF...";
+
+                    for (let pageNum of pagesToExtract) {
+                        const page = await pdf.getPage(pageNum);
+                        const content = await page.getTextContent();
+                        const strings = content.items.map(item => item.str);
+                        extractedText += `\n--- PAGE ${pageNum} ---\n` + strings.join(' ');
+                    }
+
+                    pdfTextContent = extractedText;
+                    document.getElementById('certStatus').innerText = `PDF : ${pagesToExtract.length} pages prêtes`;
+                    console.log("Texte extrait (début) :", pdfTextContent.substring(0, 300));
+                    alert(`Extraction réussie de ${pagesToExtract.length} pages.`);
+
+                } catch (err) {
+                    console.error(err);
+                    alert("Erreur PDF : " + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // --- UTILITAIRES ---
+
+        function parsePageRange(range, maxPages) {
+            const pages = new Set();
+            const parts = range.split(/[,;]/);
+            parts.forEach(part => {
+                if (part.includes('-')) {
+                    const [start, end] = part.split('-').map(n => parseInt(n.trim()));
+                    for (let i = start; i <= end && i <= maxPages; i++) if(i > 0) pages.add(i);
+                } else {
+                    const num = parseInt(part.trim());
+                    if (!isNaN(num) && num <= maxPages && num > 0) pages.add(num);
+                }
+            });
+            return Array.from(pages).sort((a, b) => a - b);
+        }
+
+
+        // -- IA
+        document.getElementById('runAnalysis').addEventListener('click', async () => {
+        const provider = document.getElementById('apiProvider').value;
+        const apiKey = document.getElementById('apiKey').value;
+        const aiOutput = document.getElementById('aiOutput');
+        const spinner = document.getElementById('loadingSpinner');
+
+        if (!apiKey) return alert("Veuillez saisir votre clé API.");
+        if (!window.lastDecodedJson) return alert("Veuillez charger un certificat.");
+        if (!pdfTextContent) return alert("Veuillez charger le document PC/DPC (.pdf).");
+
+        // UI State
+        spinner.classList.remove('hidden');
+        aiOutput.innerHTML = '<p class="text-blue-600 animate-pulse font-medium text-sm">Analyse en cours...</p>';
+
+        const prompt = `
+Tu es un auditeur expert PKI. Compare ce certificat aux règles de la PC.
+Réponds EXCLUSIVEMENT par un tableau JSON. 
+Si une règle n'est pas trouvée dans les extraits, indique "Règle non trouvée dans l'extrait fourni".
+
+FORMAT :
+[
+  {
+    "champ": "CN",
+    "valeur": "...",
+    "statut": "CONFORME",
+    "analyse": "Court résumé",
+    "extrait_pc": "Citation courte"
+  }
+]
+
+IMPORTANT : Ne fais pas d'introduction, ne conclus pas. Ne dépasse pas 15 éléments pour éviter les coupures de texte.
+
+JSON : ${JSON.stringify(window.lastDecodedJson)}
+PDF : ${pdfTextContent}
+`;
+
+        try {
+            const rawResponse = await callAI(provider, apiKey, prompt);
+            
+            let jsonMatch = rawResponse.match(/\[[\s\S]*\]/);
+            if (!jsonMatch) throw new Error("Format JSON non détecté");
+            
+            const auditData = JSON.parse(jsonMatch[0].replace(/\n/g, " "));
+
+            // AJOUT DE "overflow-x-auto" pour l'ascenseur horizontal
+            let html = `
+                <div class="w-full overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
+                    <table class="min-w-[600px] w-full divide-y divide-gray-200 bg-white table-fixed">
+                        <thead class="bg-gray-50 text-[10px]">
+                            <tr>
+                                <th class="w-1/4 px-3 py-2 text-left font-bold text-gray-500 uppercase">Champ</th>
+                                <th class="w-24 px-3 py-2 text-left font-bold text-gray-500 uppercase">Statut</th>
+                                <th class="px-3 py-2 text-left font-bold text-gray-500 uppercase">Analyse & Règle PC</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200 text-xs">
+            `;
+
+            auditData.forEach(item => {
+                const statusKey = item.statut.replace(/\s+/g, '_').toUpperCase();
+                const statusColors = {
+                    'CONFORME': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                    'NON_CONFORME': 'bg-red-100 text-red-700 border-red-200',
+                    'ATTENTION': 'bg-amber-100 text-amber-700 border-amber-200'
+                };
+                const colorClass = statusColors[statusKey] || 'bg-gray-100 text-gray-600';
+
+                html += `
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="px-3 py-3 align-top">
+                            <div class="font-bold text-gray-900 break-words">${item.champ}</div>
+                            <div class="text-[10px] font-mono text-blue-600 mt-1 break-all">${item.valeur}</div>
+                        </td>
+                        <td class="px-3 py-3 align-top">
+                            <span class="px-2 py-0.5 rounded-full text-[9px] font-bold border ${colorClass} whitespace-nowrap">${item.statut}</span>
+                        </td>
+                        <td class="px-3 py-3 align-top">
+                            <p class="mb-1.5 font-medium text-gray-800 leading-relaxed">${item.analyse}</p>
+                            <div class="bg-gray-50 p-2 rounded border-l-2 border-gray-300 text-[10px] italic text-gray-500">
+                                <span class="font-bold not-italic text-[9px] block text-gray-400 uppercase mb-0.5">Extrait PC :</span>
+                                "${item.extrait_pc}"
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table></div>`;
+            aiOutput.innerHTML = html;
+
+        } catch (err) {
+            console.error("Audit Error:", err);
+            aiOutput.innerHTML = `<div class="p-4 bg-red-50 text-red-700 rounded-lg text-xs"><strong>Erreur :</strong> ${err.message}</div>`;
+        } finally {
+            // CE BLOC EST INDISPENSABLE POUR ARRÊTER LE SPINNER
+            spinner.classList.add('hidden');
+        }
+    });
+    // --- CLIENTS API (EXEMPLE GOOGLE GEMINI) ---
+    async function callAI(provider, key, prompt) {
+        if (provider === 'google') {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+            const resp = await fetch(url, {
+                method: 'POST',
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            });
+            const data = await resp.json();
+            return data.candidates[0].content.parts[0].text;
+        }
+
+        if (provider === 'anthropic') {
+            const url = `https://api.anthropic.com/v1/messages`;
+            
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'x-api-key': key,
+                    'anthropic-version': '2023-06-01',
+                    'content-type': 'application/json',
+                    'anthropic-dangerous-direct-browser-access': 'true' // Requis pour test local direct
+                },
+                body: JSON.stringify({
+                    model: "claude-sonnet-4-6",
+                    max_tokens: 4096,
+                    messages: [
+                        { role: "user", content: prompt }
+                    ]
+                })
+            });
+
+            if (!resp.ok) {
+                const errData = await resp.json();
+                throw new Error(errData.error?.message || "Erreur API Anthropic");
+            }
+
+            const data = await resp.json();
+            return data.content[0].text;
+        }
+
+        throw new Error(`Le fournisseur ${provider} n'est pas encore configuré.`);
+    }
+
+    // Utilitaire simple pour rendre le Markdown lisible sans bibliothèque lourde
+    function formatMarkdown(text) {
+        return text
+            .replace(/^### (.*$)/gim, '<h3 class="text-lg font-bold mt-4 mb-2 text-blue-800">$1</h3>')
+            .replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold mt-6 mb-3 border-b pb-1">$1</h2>')
+            .replace(/^\* (.*$)/gim, '<li class="ml-4 list-disc">$1</li>')
+            .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
+            .replace(/\n/g, '<br>');
+    }
+    </script>
+</body>
+</html>
