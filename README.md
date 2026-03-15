@@ -6,7 +6,6 @@
 - **Analyseur ASN.1 intelligent** : Décodage complet des extensions critiques (SAN, AIA, QCStatements, PSD2, CABF).
 - **Rendu Hiérarchique** : Visualisation claire et repliable de la structure du certificat.
 - **Audit Assisté par IA** : Utilise Claude 3.5 Sonnet pour valider les champs par rapport aux règles métier extraites d'un PDF.
-- **Respect de la vie privée** : Analyse 100% côté client (le certificat ne quitte jamais votre navigateur).
 
 ## 🚀 Installation
 1. Clonez le dépôt : `git clone https://github.com/gwnl-gthb/certcheck-ai.git`
