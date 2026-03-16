@@ -48,7 +48,8 @@ const OID_MAP = {
     "1.3.6.1.5.5.7.1.1": "Authority Information Access",
     "1.3.6.1.5.5.7.1.3": "QC Statements",
     //CAB forum
-    "2.23.140.3.1": "CABF Organization Identifier"
+    "2.23.140.3.1": "CABF Organization Identifier",
+    "1.3.6.1.4.1.11129.2.4.2": "SCT List (Certificate Transparency)"
 };
 
 const ALGO_MAP = {
@@ -151,6 +152,77 @@ function hexToUtf8(hex) {
 function getRSAModulusSize(hex) {
     const cleanHex = (hex || "").replace(/^00+/, '');
     return cleanHex.length * 4;
+}
+
+function decodeSCT(node) {
+    let hex = "";
+    // 1. Extraction récursive de la valeur hex la plus profonde
+    if (node.tagNumber === 4 && node.value && node.value.length > 100) {
+        hex = node.value;
+    } else if (node.children) {
+        // On cherche dans les enfants si le parent est une SEQUENCE ou un wrapper
+        const deepNode = node.children.find(c => c.value && c.value.length > 100);
+        if (deepNode) hex = deepNode.value;
+    }
+
+    if (!hex) return "Données SCT non détectées";
+
+    try {
+        let scts = [];
+        // 2. Localisation du début de la liste TLS
+        // Un SCT v1 commence par 00 (version) suivi de 32 octets de LogID.
+        // On cherche le marqueur '00' suivi d'un LogID plausible.
+        let offset = hex.indexOf("00");
+        
+        // Si le premier 00 est un header de longueur (ex: 007e), on saute.
+        // On valide par la présence d'un timestamp 8 octets plus loin (+66 chars hex)
+        let count = 1;
+        while (offset !== -1 && offset + 82 <= hex.length) {
+            const timestampHex = hex.substring(offset + 66, offset + 82);
+            const timestampMs = Number(BigInt("0x" + timestampHex));
+
+            // Une date SCT doit être comprise entre 2015 et 2035
+            if (timestampMs > 1420070400000 && timestampMs < 2051222400000) {
+                const logId = hex.substring(offset + 2, offset + 66).toUpperCase();
+                const date = new Date(timestampMs).toLocaleString('fr-FR', { 
+                    timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                });
+
+                scts.push(`[SCT #${count}] ${getLogName(logId)} | Date: ${date} UTC`);
+                count++;
+                
+                // Saut vers le prochain SCT : Header(94 hex) + Signature (environ 144 hex)
+                // Pour être robuste, on cherche le prochain '00' au moins 200 chars plus loin
+                offset = hex.indexOf("00", offset + 200);
+            } else {
+                // Si la date n'est pas valide, ce n'est pas un début de SCT, on cherche le '00' suivant
+                offset = hex.indexOf("00", offset + 2);
+            }
+            
+            if (count > 5) break; 
+        }
+
+        return scts.length > 0 ? scts.join(" || ") : "Structure binaire SCT complexe (non décodée)";
+    } catch (e) {
+        return "Erreur binaire : " + e.message;
+    }
+}
+
+function getLogName(id) {
+    const logs = {
+        "007E008ECA470BACDE6AF3A206B0A47A84B746FE1FC6BF953E25E69B4EE40248F3": "Google 'Xenon'",
+        "7E008ECA470BACDE6AF3A206B0A47A84B746FE1FC6BF953E25E69B4EE40248F3": "Google 'Xenon'",
+        "4C63DC98E59C1DAB88F61E8A3DDEAE8FAB44A3377B5F9B94C3FBA19CFCC1BE26": "Cloudflare 'Nimbus'",
+        "604C9AAF7A7F775F01D406FC920DC899EB0B1C7DF8C9521BFAFA17773B978BC9": "DigiCert 'Yeti'",
+        "EECD19075197EF055A1AEEF20754248870A6D3503C333B3F0B16935B7E111976": "Google 'Pilot'"
+    };
+    // On nettoie l'ID pour la comparaison
+    const cleanId = id.startsWith("00") ? id : id; 
+    for (let key in logs) {
+        if (cleanId.includes(key)) return logs[key];
+    }
+    return "Log: " + id.substring(0, 12) + "...";
 }
 
 function decodeCABFOrgId(node) {
@@ -666,6 +738,9 @@ function enrichNode(node, path = "root") {
                     }
                     else if (lastOIDLabel === "CABF Organization Identifier") {
                         child["x509-decoded"] = decodeCABFOrgId(child);
+                    }
+                    else if (lastOIDLabel === "SCT List (Certificate Transparency)") {
+                        child["x509-decoded"] = decodeSCT(child);
                     }
                     else if (lastOIDLabel === "Subject Alternative Name") {
                         child["x509-name"] = "Subject Alternative Name (Contenu)"; // On force le nom propre
