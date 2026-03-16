@@ -2,6 +2,162 @@ import * as asn1js from 'https://cdn.jsdelivr.net/npm/asn1js@3.0.5/+esm';
 
 // --- DICTIONNAIRES DE TRADUCTION ---
 
+const OID_MAP = {
+    "0.4.0.1456.1.1": "QCP-n-QSCD (Qualified Person with QSCD)",
+    "0.4.0.1456.1.2": "QCP-n (Qualified Person no QSCD)",
+    "0.4.0.1456.1.3": "QCP-l-QSCD (Qualified Seal with QSCD)",
+    "0.4.0.1456.1.4": "QCP-l (Qualified Seal no QSCD)",
+    "0.4.0.1862.1.1": "QC-Compliance (Qualified Certificate)",
+    "0.4.0.1862.1.2": "QC-LimitValue",
+    "0.4.0.1862.1.3": "QC-RetentionPeriod",
+    "0.4.0.1862.1.4": "QC-QSCD (Hardware Secure Device)",
+    "0.4.0.1862.1.5": "QC-PDS (PKI Disclosure Statement)",
+    "0.4.0.1862.1.6": "QC-Type",
+    "0.4.0.1862.1.6.1": "QC-Type-Signature",
+    "0.4.0.1862.1.6.2": "QC-Type-Seal",
+    "0.4.0.1862.1.6.3": "QC-Type-Web",
+    "0.4.0.1862.1.6.4": "QC-Type-Web (SSL/TLS Qualified)",
+    "0.4.0.2042.1.2": "DVCP (Domain Validated)",
+    "0.4.0.2042.1.3": "OVCP (Organization Validated)",
+    "0.4.0.2042.1.4": "IVCP (Individual Validated)",
+    "0.4.0.2042.1.5": "EVCP (Extended Validation)",
+    "0.4.0.2042.1.6": "NCP-psd2 (Qualified Certificate for PSD2)",
+    "0.4.0.19495.1.1": "PSP_AS (Account Servicing)",
+    "0.4.0.19495.1.2": "PSP_PI (Payment Initiation)",
+    "0.4.0.19495.1.3": "PSP_AI (Account Information)",
+    "0.4.0.19495.1.4": "PSP_IC (Issuing of Card-based Instruments)",
+    "0.4.0.19495.2": "QC-PSD2-Extension",
+    "0.4.0.19495.3.1": "QCP-n-psd2 (Qualified Person PSD2)",
+    "0.4.0.19495.3.2": "QCP-l-psd2 (Qualified Seal PSD2)",
+    "0.4.0.194112.1.1": "LCP (Lightweight Certificate Policy)",
+    "0.4.0.194112.1.2": "NCP (Normalized Certificate Policy)",
+    "0.4.0.194112.1.3": "NCP+ (NCP with QSCD)",
+    "0.9.2342.19200300.100.1.1": "User ID (UID)",
+    "1.2.250.1.137.1.1.1.2.1": "RGS: Une Étoile (*)",
+    "1.2.250.1.137.1.1.1.2.2": "RGS: Deux Étoiles (**)",
+    "1.2.250.1.137.1.1.1.2.3": "RGS: Trois Étoiles (***)",
+    "1.2.840.10040.4.1": "DSA (Digital Signature Algorithm)",
+    "1.2.840.10045.2.1": "ECC (Elliptic Curve Cryptography)",
+    "1.2.840.10045.3.1.1": "prime192v1 (Elliptic Curve)",
+    "1.2.840.10045.3.1.2" : "prime239v1 (Elliptic Curve)",
+    "1.2.840.10045.3.1.3" : "prime239v2 (Elliptic Curve)",
+    "1.2.840.10045.3.1.4" : "prime239v3 (Elliptic Curve)",
+    "1.2.840.10045.3.1.7": "ECDSA P-256 (nistP256)",
+    "1.2.840.10045.4.1": "ECDSA with SHA-1 (OBSOLETE)",
+    "1.2.840.10045.4.3.2": "ECDSA with SHA-256",
+    "1.2.840.113549.1.1.1": "RSA Encryption",
+    "1.2.840.113549.1.1.2": "MD2 with RSA (OBSOLETE)",
+    "1.2.840.113549.1.1.3": "MD4 with RSA (OBSOLETE)",
+    "1.2.840.113549.1.1.4": "MD5 with RSA (OBSOLETE)",
+    "1.2.840.113549.1.1.5": "SHA-1 with RSA (OBSOLETE)",
+    "1.2.840.113549.1.1.8": "PKCS#1 MGF1 (Mask Generation Function)",
+    "1.2.840.113549.1.1.10": "RSASSA-PSS (Signature Algorithm)",
+    "1.2.840.113549.1.1.11": "SHA-256 with RSA",
+    "1.2.840.113549.1.1.12": "SHA-384 with RSA",
+    "1.2.840.113549.1.1.13": "SHA-512 with RSA",
+    "1.2.840.113549.1.1.14": "SHA-224 with RSA",
+    "1.2.840.113549.1.9.1": "Email (E)",
+    "1.2.840.113549.1.9.2": "Unstructured Name",
+    "1.2.840.113583.1.1.5":"PdfAuthenticDocumentsTrust (Adobe)",
+    "1.2.840.113583.1.1.9.1": "Adobe: Embed Revocation Info",
+    "1.2.840.113583.1.1.9.2": "Adobe: Revocation Checking (Long-term Validation)",
+    "1.2.840.113583.1.1.10": "Adobe: Authentic Documents Trust",
+    "1.2.840.113583.1.1.11": "Adobe: Archive Revocation Info (Timestamping)",
+    "1.2.840.113549.1.9.8" : "Signing Time",
+    "1.3.6.1.4.1.311.2.1.22": "MS: Commercial Code Signing",
+    "1.3.6.1.4.1.311.10.3.4": "documentSigning (MS)",
+    "1.3.6.1.4.1.311.10.3.11": "MS: Key Recovery Agent",
+    "1.3.6.1.4.1.311.10.3.12": "Document Signing",
+    "1.3.6.1.4.1.311.20.2": "MS: Certificate Template Name",
+    "1.3.6.1.4.1.311.20.2.2": "Smart Card Logon (MS)",
+    "1.3.6.1.4.1.311.21.7": "MS: Root List Identifier",
+    "1.3.6.1.4.1.311.21.10": "MS: Application Policies",
+    "1.3.6.1.4.1.311.60.2.1.1": "Jurisdiction Locality (JL)",
+    "1.3.6.1.4.1.311.60.2.1.2": "Jurisdiction State (JS)",
+    "1.3.6.1.4.1.311.60.2.1.3": "Jurisdiction Country (JC)",
+    "1.3.6.1.4.1.4146.1.1": "GlobalSign: Trusted Platform Module (TPM)",
+    "1.3.6.1.4.1.11129.2.4.2": "SCT List (Certificate Transparency)",
+    "1.3.6.1.4.1.45724.1.1.4": "Google: Cloud KMS Key Metadata",
+    "1.3.6.1.5.5.7.1.1": "Authority Information Access",
+    "1.3.6.1.5.5.7.1.3": "QC Statements",
+    "1.3.6.1.5.5.7.1.11": "Subject Information Access (SIA)",
+    "1.3.6.1.5.5.7.1.12": "Logotype Extension",
+    "1.3.6.1.5.5.7.3.1": "serverAuth",
+    "1.3.6.1.5.5.7.3.2": "clientAuth",
+    "1.3.6.1.5.5.7.3.3": "codeSigning",
+    "1.3.6.1.5.5.7.3.4": "emailProtection",
+    "1.3.6.1.5.5.7.3.5" : "ipsecEndSystem",
+    "1.3.6.1.5.5.7.3.6" : "ipsecTunnel",
+    "1.3.6.1.5.5.7.3.7" : "ipsecUser",
+    "1.3.6.1.5.5.7.3.8": "timeStamping",
+    "1.3.6.1.5.5.7.3.9": "ocspSigning",
+    "1.3.6.1.5.5.7.48.1": "OCSP Responder",
+    "1.3.6.1.5.5.7.48.1.1": "OCSP Basic Response",
+    "1.3.6.1.5.5.7.48.1.2": "OCSP Service Locator",
+    "1.3.6.1.5.5.7.48.1.3": "OCSP Archive Cutoff",
+    "1.3.6.1.5.5.7.48.1.4": "OCSP Extended Revocation",
+    "1.3.6.1.5.5.7.48.1.5": "OCSP Nocheck",
+    "1.3.6.1.5.5.7.48.2": "CA Issuers (Cert URL)",
+    "1.3.101.112": "Ed25519",
+    "1.3.132.0.34": "ECDSA P-384 (nistP384)",
+    "1.3.132.0.35": "ECDSA P-521 (nistP521)",
+    "1.3.36.3.3.2.8.1.1.7": "brainpoolP256r1 (Elliptic Curve)",
+    "1.3.36.3.3.2.8.1.1.11": "brainpoolP384r1 (Elliptic Curve)",
+    "2.5.4.3": "Common Name (CN)",
+    "2.5.4.4": "Surname (SN)",
+    "2.5.4.5": "Serial Number (DN)",
+    "2.5.4.6": "Country (C)",
+    "2.5.4.7": "Locality (L)",
+    "2.5.4.8": "State or Province (ST)",
+    "2.5.4.9": "Street Address (S)",
+    "2.5.4.10": "Organization (O)",
+    "2.5.4.11": "Organizational Unit (OU)",
+    "2.5.4.12": "Title (T)",
+    "2.5.4.13": "Description",
+    "2.5.4.15": "Business Category (BC)",
+    "2.5.4.17": "Postal Code (PC)",
+    "2.5.4.20": "Telephone Number",
+    "2.5.4.41": "Name",
+    "2.5.4.42": "Given Name (GN)",
+    "2.5.4.43": "Initials",
+    "2.5.4.44": "Generation Qualifier",
+    "2.5.4.46": "dnQualifier",
+    "2.5.4.65": "Pseudonym",
+    "2.5.4.97": "Organization Identifier (OI)",
+    "2.5.29.14": "Subject Key Identifier",
+    "2.5.29.15": "Key Usage",
+    "2.5.29.17": "Subject Alternative Name",
+    "2.5.29.18": "Issuer Alternative Name",
+    "2.5.29.19": "Basic Constraints",
+    "2.5.29.20": "CRL Number",
+    "2.5.29.21": "Reason Code",
+    "2.5.29.30": "Name Constraints",
+    "2.5.29.31": "CRL Distribution Points",
+    "2.5.29.32": "Certificate Policies",
+    "2.5.29.32.0": "Any Policy",
+    "2.5.29.32.1": "Any Extended Key Usage",
+    "2.5.29.33": "Policy Mappings",
+    "2.5.29.35": "Authority Key Identifier",
+    "2.5.29.36": "Policy Constraints",
+    "2.5.29.37": "Extended Key Usage",
+    "2.5.29.54": "Inhibit Any Policy",
+    "2.16.840.1.101.3.2.1.48.1": "PIV Card Authentication",
+    "2.16.840.1.113730.1.1": "Netscape Certificate Type",
+    "2.16.840.1.113730.1.13": "Netscape Comment",
+    "2.23.140.1.1": "CABF: Extended Validation (EV) TLS",
+    "2.23.140.1.2.1": "CABF: Domain Validated (DV) TLS",
+    "2.23.140.1.2.2": "CABF: Organization Validated (OV) TLS",
+    "2.23.140.1.2.3": "CABF: Individual Validated (IV) TLS",
+    "2.23.140.1.4.1": "CABF: Code Signing (Baseline)",
+    "2.23.140.1.3": "CABF: EV Code Signing",
+    "2.23.140.1.5.1": "CABF: S/MIME Mailbox Validated",
+    "2.23.140.1.5.2": "CABF: S/MIME Organization Validated",
+    "2.23.140.1.5.3": "CABF: S/MIME Sponsor Validated",
+    "2.23.140.1.5.4": "CABF: S/MIME Individual Validated",
+    "2.23.140.2.1": "CABF: Test Certificate Policy",
+    "2.23.140.3.1": "CABF Organization Identifier"
+};
+
 const ASN1_UNIVERSAL_NAMES = {
     0: "Reserved/EndOfContent",
     1: "Boolean",
@@ -26,80 +182,11 @@ const ASN1_UNIVERSAL_NAMES = {
     24: "GeneralizedTime"
 };
 
-const OID_MAP = {
-    //DN
-    "2.5.4.3": "Common Name (CN)",
-    "2.5.4.6": "Country (C)",
-    "2.5.4.10": "Organization (O)",
-    "2.5.4.11": "Organizational Unit (OU)",
-    "2.5.4.97": "Organization Identifier",
-    "2.5.4.42": "Given Name",
-    "2.5.4.4": "Surname",
-    "2.5.4.5": "Serial Number (DN)",
-    //Extension
-    "2.5.29.15": "Key Usage",
-    "2.5.29.17": "Subject Alternative Name",
-    "2.5.29.19": "Basic Constraints",
-    "2.5.29.32": "Certificate Policies",
-    "2.5.29.37": "Extended Key Usage",
-    "2.5.29.14": "Subject Key Identifier",
-    "2.5.29.35": "Authority Key Identifier",
-    "2.5.29.31": "CRL Distribution Points",
-    "1.3.6.1.5.5.7.1.1": "Authority Information Access",
-    "1.3.6.1.5.5.7.1.3": "QC Statements",
-    //CAB forum
-    "2.23.140.3.1": "CABF Organization Identifier",
-    "1.3.6.1.4.1.11129.2.4.2": "SCT List (Certificate Transparency)"
-};
-
-const ALGO_MAP = {
-    "1.2.840.113549.1.1.1": "RSA Encryption",
-    "1.2.840.113549.1.1.11": "SHA-256 with RSA",
-    "1.2.840.113549.1.1.12": "SHA-384 with RSA",
-    "1.2.840.113549.1.1.13": "SHA-512 with RSA",
-    "1.2.840.10045.4.3.2": "ECDSA with SHA-256",
-    "1.3.6.1.4.1.311.10.3.12": "Document Signing",
-    "1.2.840.113549.1.1.5": "SHA-1 with RSA (OBSOLETE)"
-};
-
-const EKU_MAP = {
-    "1.3.6.1.5.5.7.3.1": "serverAuth",
-    "1.3.6.1.5.5.7.3.2": "clientAuth",
-    "1.3.6.1.5.5.7.3.3": "codeSigning",
-    "1.3.6.1.5.5.7.3.4": "emailProtection",
-    "1.3.6.1.5.5.7.3.8": "timeStamping",
-    "1.3.6.1.5.5.7.3.9": "ocspSigning",
-    "1.3.6.1.4.1.311.10.3.4": "documentSigning (MS)",
-    "1.2.840.113583.1.1.5":"PdfAuthenticDocumentsTrust"
-};
-
 const KEY_USAGE_LABELS = [
     "digitalSignature", "nonRepudiation", "keyEncipherment", 
     "dataEncipherment", "keyAgreement", "keyCertSign", 
     "cRLSign", "encipherOnly", "decipherOnly"
 ];
-
-const AIA_TYPES = {
-    "1.3.6.1.5.5.7.48.1": "OCSP Responder",
-    "1.3.6.1.5.5.7.48.2": "CA Issuers (Cert URL)"
-};
-
-const QC_STATEMENTS_MAP = {
-    "0.4.0.1862.1.1": "QC-Compliance (Qualified Certificate)",
-    "0.4.0.1862.1.3": "QC-RetentionPeriod",
-    "0.4.0.1862.1.4": "QC-QSCD (Hardware Secure Device)",
-    "0.4.0.1862.1.5": "QC-PDS (PKI Disclosure Statement)",
-    "0.4.0.1862.1.6": "QC-Type",
-    "0.4.0.1862.1.6.1": "QC-Type-Signature",
-    "0.4.0.1862.1.6.2": "QC-Type-Seal",
-    "0.4.0.1862.1.6.3": "QC-Type-Web",
-    "0.4.0.19495.2": "QC-PSD2-Extension",
-    "0.4.0.19495.1.1": "PSP_AS (Account Servicing)",
-    "0.4.0.19495.1.2": "PSP_PI (Payment Initiation)",
-    "0.4.0.19495.1.3": "PSP_AI (Account Information)",
-    "0.4.0.19495.1.4": "PSP_IC (Issuing of Card-based Instruments)"
-};
-
 
 const GENERAL_NAME_TAGS = {
     0: "OtherName",
@@ -111,24 +198,6 @@ const GENERAL_NAME_TAGS = {
     6: "uniformResourceIdentifier (URI)",
     7: "iPAddress",
     8: "registeredID"
-};
-
-const CABF_MAP = {
-    // Baseline Requirements - TLS
-    "2.23.140.1.1": "CABF: Extended Validation (EV) TLS",
-    "2.23.140.1.2.1": "CABF: Domain Validated (DV) TLS",
-    "2.23.140.1.2.2": "CABF: Organization Validated (OV) TLS",
-    "2.23.140.1.2.3": "CABF: Individual Validated (IV) TLS",
-    
-    // Code Signing
-    "2.23.140.1.4.1": "CABF: Code Signing (Baseline)",
-    "2.23.140.1.3": "CABF: EV Code Signing",
-
-    // S/MIME (Nouveaux OIDs 2023)
-    "2.23.140.1.5.1": "CABF: S/MIME Mailbox Validated",
-    "2.23.140.1.5.2": "CABF: S/MIME Organization Validated",
-    "2.23.140.1.5.3": "CABF: S/MIME Sponsor Validated",
-    "2.23.140.1.5.4": "CABF: S/MIME Individual Validated"
 };
 
 // --- UTILITAIRES ---
@@ -286,7 +355,7 @@ function decodeAIA(node) {
             n.children.forEach(child => {
                 // 1. On identifie le type via l'OID
                 if (child.tagNumber === 6 && typeof child.oid === 'string') {
-                    if (AIA_TYPES[child.oid]) type = AIA_TYPES[child.oid];
+                    if (OID_MAP[child.oid]) type = OID_MAP[child.oid];
                 }
                 
                 // 2. On récupère l'URL (IA5String ou tag contextuel interpreté comme OID)
@@ -372,7 +441,7 @@ function decodeQCStatements(node) {
         
         siblings.forEach(s => {
             if (s.tagNumber === 6 && typeof s.oid === 'string') {
-                const roleLabel = QC_STATEMENTS_MAP[s.oid];
+                const roleLabel = OID_MAP[s.oid];
                 if (roleLabel) roles.push(roleLabel);
             } else if ([12, 19, 22].includes(s.tagNumber)) { // UTF8, PrintString, IA5
                 const txt = hexToUtf8(s.value).trim();
@@ -392,7 +461,7 @@ function decodeQCStatements(node) {
 
     function walk(n) {
         if (n.tagNumber === 6 && typeof n.oid === 'string') {
-            const label = QC_STATEMENTS_MAP[n.oid];
+            const label = OID_MAP[n.oid];
             if (label) statements.push(label);
         }
 
@@ -431,8 +500,8 @@ function decodePolicies(node) {
 
     function walk(n) {
         if (n.tagNumber === 6 && typeof n.oid === 'string') {
-            // On cherche dans l'OID_MAP (pour les standards) ou CABF_MAP
-            const label = CABF_MAP[n.oid] || n.oid;
+            // On cherche dans l'OID_MAP (pour les standards) ou OID_MAP
+            const label = OID_MAP[n.oid] || n.oid;
             
             if (n.oid !== "1.3.6.1.5.5.7.2.1" && n.oid !== "1.3.6.1.5.5.7.2.2") {
                 policies.push(label);
@@ -657,7 +726,7 @@ function enrichNode(node, path = "root") {
                 const isRealOID = (typeof child.oid === 'string' && child.oid.includes('.'));
 
                 if (isRealOID) {
-                    const label = OID_MAP[child.oid] || ALGO_MAP[child.oid] || QC_STATEMENTS_MAP[child.oid] || CABF_MAP[child.oid] || child.oid;
+                    const label = OID_MAP[child.oid] || child.oid;
                     child["x509-name"] = "Identifier";
                     child["x509-decoded"] = label;
                     lastOIDLabel = label;
@@ -709,7 +778,7 @@ function enrichNode(node, path = "root") {
                         // On cherche les OID à l'intérieur
                         let usages = [];
                         function findEKU(n) {
-                            if (n.tagNumber === 6) usages.push(EKU_MAP[n.oid] || n.oid);
+                            if (n.tagNumber === 6) usages.push(OID_MAP[n.oid] || n.oid);
                             if (n.children) n.children.forEach(findEKU);
                         }
                         findEKU(child);
