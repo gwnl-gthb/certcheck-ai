@@ -32,6 +32,8 @@ const OID_MAP = {
     "0.4.0.194112.1.1": "LCP (Lightweight Certificate Policy)",
     "0.4.0.194112.1.2": "NCP (Normalized Certificate Policy)",
     "0.4.0.194112.1.3": "NCP+ (NCP with QSCD)",
+    "0.4.0.194121.1.2": "id-etsi-qcs-SemanticsId-Legal (Personne Morale)",
+    "0.4.0.194121.1.1": "id-etsi-qcs-SemanticsId-Natural (Personne Physique)",
     "0.9.2342.19200300.100.1.1": "User ID (UID)",
     "1.2.250.1.137.1.1.1.2.1": "RGS: Une Étoile (*)",
     "1.2.250.1.137.1.1.1.2.2": "RGS: Deux Étoiles (**)",
@@ -91,6 +93,7 @@ const OID_MAP = {
     "1.3.6.1.5.5.7.3.7" : "ipsecUser",
     "1.3.6.1.5.5.7.3.8": "timeStamping",
     "1.3.6.1.5.5.7.3.9": "ocspSigning",
+    "1.3.6.1.5.5.7.11.2": "PkixQCSyntax-v2",
     "1.3.6.1.5.5.7.48.1": "OCSP Responder",
     "1.3.6.1.5.5.7.48.1.1": "OCSP Basic Response",
     "1.3.6.1.5.5.7.48.1.2": "OCSP Service Locator",
@@ -126,6 +129,7 @@ const OID_MAP = {
     "2.5.4.97": "Organization Identifier (OI)",
     "2.5.29.14": "Subject Key Identifier",
     "2.5.29.15": "Key Usage",
+    "2.5.29.16": "Private Key Usage Period",
     "2.5.29.17": "Subject Alternative Name",
     "2.5.29.18": "Issuer Alternative Name",
     "2.5.29.19": "Basic Constraints",
@@ -221,6 +225,41 @@ function hexToUtf8(hex) {
 function getRSAModulusSize(hex) {
     const cleanHex = (hex || "").replace(/^00+/, '');
     return cleanHex.length * 4;
+}
+
+function decodePrivateKeyUsage(node) {
+    let period = { notBefore: "", notAfter: "" };
+
+    function walk(n) {
+        // Dans 2.5.29.16, les dates sont en Context-Specific:
+        // [0] = notBefore, [1] = notAfter
+        if (n.tagClass === 3 && n.value) {
+            const raw = hexToUtf8(n.value);
+            // Format GeneralizedTime attendu à l'intérieur : YYYYMMDDHHMMSSZ
+            if (raw.length >= 12) {
+                const formattedDate = `${raw.substring(6, 8)}/${raw.substring(4, 6)}/${raw.substring(0, 4)} ${raw.substring(8, 10)}:${raw.substring(10, 12)} UTC`;
+                
+                if (n.tagNumber === 0) {
+                    period.notBefore = formattedDate;
+                    n["x509-name"] = "Usage Not Before";
+                    n["x509-decoded"] = formattedDate;
+                } else if (n.tagNumber === 1) {
+                    period.notAfter = formattedDate;
+                    n["x509-name"] = "Usage Not After";
+                    n["x509-decoded"] = formattedDate;
+                }
+            }
+        }
+        if (n.children) n.children.forEach(walk);
+    }
+
+    walk(node);
+
+    let parts = [];
+    if (period.notBefore) parts.push(`Start: ${period.notBefore}`);
+    if (period.notAfter) parts.push(`End: ${period.notAfter}`);
+
+    return parts.length > 0 ? parts.join(" | ") : "Format de période non reconnu";
 }
 
 function decodeSCT(node) {
@@ -815,6 +854,9 @@ function enrichNode(node, path = "root") {
                         child["x509-name"] = "Subject Alternative Name (Contenu)"; // On force le nom propre
                         child["x509-decoded"] = decodeSAN(child);
                     }
+                    else if (lastOIDLabel === "Private Key Usage Period") {
+                        child["x509-decoded"] = decodePrivateKeyUsage(child);
+                    }
                     else {
                         child["x509-decoded"] = "Voir détails enfants";
                     }
@@ -825,15 +867,87 @@ function enrichNode(node, path = "root") {
     }
 }
 
-window.parseCertificate = async function(pemString) {
-    const b64 = pemString.replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/[^A-Za-z0-9+/=]/g, "");
-    const bytes = new Uint8Array(atob(b64).split("").map(c => c.charCodeAt(0)));
-    const asn1 = asn1js.fromBER(bytes.buffer);
+/*
+window.parseCertificate = async function(input) {
+    let buffer;
+    
+    // Si c'est un buffer, on vérifie si c'est du texte déguisé en binaire
+    if (input instanceof ArrayBuffer || ArrayBuffer.isView(input)) {
+        const view = new Uint8Array(input);
+        // On regarde les premiers octets : 45 45 45 45 45 = "-----"
+        if (view[0] === 0x2D && view[1] === 0x2D && view[2] === 0x2D) {
+            const text = new TextDecoder().decode(view);
+            return window.parseCertificate(text); // Récursion avec le texte
+        }
+        buffer = input;
+    } else {
+        // Logique PEM String habituelle
+        const b64 = input.replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/[^A-Za-z0-9+/=]/g, "");
+        buffer = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+    }
+
+    const asn1 = asn1js.fromBER(buffer);
     const root = mapASN1toCustomJSON(asn1.result);
     enrichNode(root);
     return [root];
 };
+*/
+window.parseCertificate = async function(input) {
+    let binaryBuffer;
+    let formatLabel = "DER (Binaire)";
 
+    // 1. GESTION DE L'INPUT (String ou ArrayBuffer)
+    if (input instanceof ArrayBuffer || ArrayBuffer.isView(input)) {
+        const view = new Uint8Array(input);
+        
+        // Détection : Est-ce que ça commence par "-----" (0x2D 0x2D 0x2D...) ?
+        // Si oui, c'est un fichier PEM chargé en mode binaire
+        if (view[0] === 0x2D && view[1] === 0x2D && view[2] === 0x2D) {
+            const text = new TextDecoder().decode(view);
+            return window.parseCertificate(text); // On relance en mode texte
+        }
+        binaryBuffer = input;
+    } 
+    else if (typeof input === "string") {
+        const trimmed = input.trim();
+        if (trimmed.startsWith("-----BEGIN")) {
+            formatLabel = "PEM (Texte)";
+            const b64 = trimmed
+                .replace(/-----BEGIN [^-]+-----/g, "")
+                .replace(/-----END [^-]+-----/g, "")
+                .replace(/[^A-Za-z0-9+/=]/g, "");
+            binaryBuffer = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+        } else {
+            // Tentative de décodage Base64 pur
+            try {
+                binaryBuffer = Uint8Array.from(atob(trimmed), c => c.charCodeAt(0)).buffer;
+                formatLabel = "Base64";
+            } catch (e) {
+                throw new Error("Format de chaîne non reconnu.");
+            }
+        }
+    }
+
+    // 2. PARSING ASN.1
+    try {
+        const asn1 = asn1js.fromBER(binaryBuffer);
+        if (asn1.offset === -1) throw new Error("ASN.1 parsing failed");
+
+        const root = mapASN1toCustomJSON(asn1.result);
+        
+        // On ajoute une info sur le format détecté dans la racine du JSON
+        root["x509-format-detected"] = formatLabel;
+        
+        enrichNode(root);
+        window.lastDecodedJson = [root];
+        return window.lastDecodedJson;
+    } catch (err) {
+        throw new Error("Le fichier n'est pas un certificat valide (DER ou PEM attendu).");
+    }
+};
+
+
+/*
 function renderNode(node, depth = 0) {
     const hasChildren = node.children && node.children.length > 0;
     const container = document.createElement('div');
@@ -892,6 +1006,74 @@ function renderNode(node, depth = 0) {
         container.appendChild(details);
     } else {
         // Si pas d'enfant, simple DIV
+        container.innerHTML = headerHtml;
+    }
+
+    return container;
+}
+*/
+function renderNode(node, depth = 0) {
+    const hasChildren = node.children && node.children.length > 0;
+    const container = document.createElement('div');
+    container.className = `mb-1 border-l-2 border-gray-200 pl-2 transition-all`;
+
+    // Couleurs des tags ASN.1
+    const tagColors = {
+        6: 'bg-amber-100 text-amber-800',    // OID
+        4: 'bg-blue-100 text-blue-800',      // Octet String
+        2: 'bg-emerald-100 text-emerald-800', // Integer
+        16: 'bg-gray-200 text-gray-700',     // Sequence
+        1: 'bg-red-100 text-red-800'         // Boolean
+    };
+    const tagClass = tagColors[node.tagNumber] || 'bg-gray-100 text-gray-600';
+
+    // Préparation des métadonnées
+    const isCritical = node["criticality"] === "CRITICAL";
+    const decodedValue = node["x509-decoded"] || "";
+    const labelName = node["x509-name"] !== "ASN1 Element" ? node["x509-name"] : node.typeName;
+    const binarySize = node.value ? Math.ceil(node.value.length / 2) : 0;
+    
+    // NOUVEAU : On récupère l'OID s'il existe
+    const oidValue = node.oid ? node.oid : "";
+
+    // Construction du contenu de l'élément
+    const headerHtml = `
+        <div class="flex flex-col gap-1 py-1 cursor-pointer">
+            <div class="flex items-center flex-wrap gap-2 text-[10px]">
+                ${hasChildren ? '<i data-lucide="chevron-right" class="w-3 h-3 text-gray-400"></i>' : '<span class="w-3"></span>'}
+                
+                <span class="font-bold text-gray-700 uppercase tracking-tight">${labelName}</span>
+                
+                ${oidValue ? `<a href="https://oid-base.com/get/${oidValue}" target="_blank" class="bg-purple-100 text-purple-700 px-1.5 rounded font-mono border border-purple-200 hover:bg-purple-200 transition-colors">OID: ${oidValue}</a>` : ''}
+                
+                <span class="${tagClass} px-1 rounded font-mono">${node.typeName}</span>
+                <span class="text-gray-400 font-mono italic">${binarySize}B</span>
+                ${isCritical ? '<span class="bg-red-500 text-white px-1 rounded font-bold animate-pulse">CRITICAL</span>' : ''}
+            </div>
+            ${decodedValue ? `<div class="bg-blue-50 border border-blue-100 rounded px-2 py-1 text-sm text-blue-900 font-medium shadow-sm ml-4">${decodedValue}</div>` : ''}
+        </div>
+    `;
+
+    if (hasChildren) {
+        const details = document.createElement('details');
+        details.className = "group";
+        if (depth < 2) details.open = true;
+
+        const summary = document.createElement('summary');
+        summary.className = "list-none outline-none";
+        summary.innerHTML = headerHtml;
+
+        const childrenContainer = document.createElement('div');
+        childrenContainer.className = "ml-4 border-l border-gray-100";
+
+        node.children.forEach(child => {
+            childrenContainer.appendChild(renderNode(child, depth + 1));
+        });
+
+        details.appendChild(summary);
+        details.appendChild(childrenContainer);
+        container.appendChild(details);
+    } else {
         container.innerHTML = headerHtml;
     }
 
