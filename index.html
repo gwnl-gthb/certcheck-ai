@@ -535,8 +535,28 @@ PDF : ${pdfTextContent}
         spinner.classList.remove('hidden');
         aiOutput.innerHTML = '<p class="text-blue-600 animate-pulse font-medium text-sm">Analyse en cours...</p>';
 
-        const prompt = `Tu es un auditeur expert PKI. Compare ce certificat aux règles de la PC. Réponds EXCLUSIVEMENT par un tableau JSON. FORMAT : [ { "champ": "CN", "valeur": "...", "statut": "CONFORME", "analyse": "...", "extrait_pc": "..." } ] JSON : ${JSON.stringify(window.lastDecodedJson)} PDF : ${pdfTextContent.substring(0, 10000)}`;
+        //const prompt = `Tu es un auditeur expert PKI. Compare ce certificat aux règles de la PC. Réponds EXCLUSIVEMENT par un tableau JSON. FORMAT : [ { "champ": "CN", "valeur": "...", "statut": "CONFORME", "analyse": "...", "extrait_pc": "..." } ] JSON : ${JSON.stringify(window.lastDecodedJson)} PDF : ${pdfTextContent}`;
+        const prompt = `
+Tu es un auditeur expert PKI. Compare ce certificat aux règles de la PC.
+Réponds EXCLUSIVEMENT par un tableau JSON. 
+Si une règle n'est pas trouvée dans les extraits, indique "Règle non trouvée dans l'extrait fourni".
 
+FORMAT :
+[
+  {
+    "champ": "CN",
+    "valeur": "...",
+    "statut": "CONFORME",
+    "analyse": "Court résumé",
+    "extrait_pc": "Citation courte"
+  }
+]
+
+IMPORTANT : Ne fais pas d'introduction, ne conclus pas. Ne dépasse pas 15 éléments pour éviter les coupures de texte.
+
+JSON : ${JSON.stringify(window.lastDecodedJson)}
+PDF : ${pdfTextContent}
+`;
         try {
             const rawResponse = await callAI(provider, apiKey, prompt);
             const jsonMatch = rawResponse.match(/\[[\s\S]*\]/);
