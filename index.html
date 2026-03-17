@@ -53,7 +53,7 @@
             <div class="flex flex-wrap items-center gap-2">
                 <div class="flex items-center gap-1">
                     <label for="certFile" class="cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-2 rounded-md border border-blue-200 text-sm font-medium transition-colors">
-                        📄 Certificats (.pem)
+                        📄 Certificats (pem/der)
                     </label>
                     <input type="file" id="certFile" class="hidden" multiple accept=".pem,.crt,.cer">
                 </div>
@@ -146,6 +146,10 @@
         });
     </script>
 
+
+
+
+<!--
     <script>
         // --- VARIABLES GLOBALES POUR L'IA ---
         let pdfTextContent = "";
@@ -395,5 +399,198 @@ PDF : ${pdfTextContent}
             .replace(/\n/g, '<br>');
     }
     </script>
+-->
+
+<script>
+    // --- VARIABLES GLOBALES POUR L'IA ---
+    let pdfTextContent = "";
+
+    // Utilitaire fiable pour convertir un ArrayBuffer en Base64 propre
+    function toBase64(buffer) {
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return window.btoa(binary);
+    }
+
+    // Initialisation sécurisée des icônes
+    window.addEventListener('load', () => {
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    });
+
+    // --- 1. GESTION DES CERTIFICATS (Correction de l'erreur atob) ---
+    document.getElementById('certFile').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const buffer = event.target.result;
+                const uint8Array = new Uint8Array(buffer);
+                
+                if (uint8Array.length === 0) throw new Error("Le fichier est vide.");
+
+                let inputForParser;
+
+                // Détection : Est-ce du PEM ? (Le tiret '-' est 0x2D)
+                if (uint8Array.length > 2 && uint8Array[0] === 0x2D && uint8Array[1] === 0x2D) {
+                    // C'est du texte PEM : conversion propre en String
+                    inputForParser = new TextDecoder().decode(uint8Array);
+                } else {
+                    // C'est du DER (binaire) : conversion en Base64 propre pour atob()
+                    inputForParser = toBase64(buffer);
+                }
+
+                // Appel au parser (qui attend une String et fera son propre nettoyage)
+                const jsonResult = await window.parseCertificate(inputForParser);
+                
+                const output = document.getElementById('parsingOutput');
+                if (output) {
+                    output.innerHTML = ""; 
+                    jsonResult.forEach(rootNode => {
+                        output.appendChild(window.renderNode(rootNode));
+                    });
+                }
+                
+                const status = document.getElementById('certStatus');
+                if (status) {
+                    const format = uint8Array[0] === 0x2D ? "PEM" : "DER";
+                    status.innerText = `Certificat ${format} décodé avec succès`;
+                }
+                
+                if (window.lucide) lucide.createIcons(); 
+            } catch (err) {
+                console.error("Erreur détaillée:", err);
+                alert("Erreur de décodage : " + err.message);
+            }
+        };
+        // Lecture en ArrayBuffer impérative pour supporter DER et PEM sans corruption
+        reader.readAsArrayBuffer(file);
+    });
+
+    // --- 2. GESTION DU PDF (PC/DPC) ---
+    document.getElementById('pcFile').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async function() {
+            try {
+                const typedarray = new Uint8Array(this.result);
+                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                const range = prompt(`Le PDF contient ${pdf.numPages} pages.\nPages contenant les profils (ex: 52-58) :`, `1-${pdf.numPages}`);
+                
+                if (!range) return;
+
+                const pagesToExtract = parsePageRange(range, pdf.numPages);
+                let extractedText = "";
+
+                for (let pageNum of pagesToExtract) {
+                    const page = await pdf.getPage(pageNum);
+                    const content = await page.getTextContent();
+                    extractedText += `\n--- PAGE ${pageNum} ---\n` + content.items.map(item => item.str).join(' ');
+                }
+
+                pdfTextContent = extractedText;
+                document.getElementById('certStatus').innerText = `PDF : ${pagesToExtract.length} pages prêtes`;
+                alert(`Extraction réussie de ${pagesToExtract.length} pages.`);
+            } catch (err) {
+                alert("Erreur PDF : " + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    // --- UTILITAIRES ---
+    function parsePageRange(range, maxPages) {
+        const pages = new Set();
+        const parts = range.split(/[,;]/);
+        parts.forEach(part => {
+            if (part.includes('-')) {
+                const [start, end] = part.split('-').map(n => parseInt(n.trim()));
+                for (let i = start; i <= end && i <= maxPages; i++) if(i > 0) pages.add(i);
+            } else {
+                const num = parseInt(part.trim());
+                if (!isNaN(num) && num <= maxPages && num > 0) pages.add(num);
+            }
+        });
+        return Array.from(pages).sort((a, b) => a - b);
+    }
+
+    // --- IA ET ANALYSE ---
+    document.getElementById('runAnalysis').addEventListener('click', async () => {
+        const provider = document.getElementById('apiProvider').value;
+        const apiKey = document.getElementById('apiKey').value;
+        const aiOutput = document.getElementById('aiOutput');
+        const spinner = document.getElementById('loadingSpinner');
+
+        if (!apiKey || !window.lastDecodedJson || !pdfTextContent) {
+            return alert("Clé API, Certificat et PDF requis.");
+        }
+
+        spinner.classList.remove('hidden');
+        aiOutput.innerHTML = '<p class="text-blue-600 animate-pulse font-medium text-sm">Analyse en cours...</p>';
+
+        const prompt = `Tu es un auditeur expert PKI. Compare ce certificat aux règles de la PC. Réponds EXCLUSIVEMENT par un tableau JSON. FORMAT : [ { "champ": "CN", "valeur": "...", "statut": "CONFORME", "analyse": "...", "extrait_pc": "..." } ] JSON : ${JSON.stringify(window.lastDecodedJson)} PDF : ${pdfTextContent.substring(0, 10000)}`;
+
+        try {
+            const rawResponse = await callAI(provider, apiKey, prompt);
+            const jsonMatch = rawResponse.match(/\[[\s\S]*\]/);
+            if (!jsonMatch) throw new Error("Format JSON non détecté dans la réponse IA");
+            const auditData = JSON.parse(jsonMatch[0]);
+            renderAuditTable(auditData, aiOutput);
+        } catch (err) {
+            aiOutput.innerHTML = `<div class="p-4 bg-red-50 text-red-700 text-xs">Erreur : ${err.message}</div>`;
+        } finally {
+            spinner.classList.add('hidden');
+        }
+    });
+
+    function renderAuditTable(data, container) {
+        let html = `<div class="w-full overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
+            <table class="min-w-[600px] w-full divide-y divide-gray-200 bg-white">
+                <thead class="bg-gray-50 text-[10px] uppercase font-bold text-gray-500">
+                    <tr><th class="px-3 py-2 text-left">Champ</th><th class="px-3 py-2 text-left">Statut</th><th class="px-3 py-2 text-left">Analyse & Règle</th></tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 text-xs">`;
+        
+        data.forEach(item => {
+            const statusClass = item.statut === 'CONFORME' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700';
+            html += `<tr class="hover:bg-gray-50">
+                <td class="px-3 py-3 align-top font-bold">${item.champ}<div class="text-[10px] font-mono text-blue-600 break-all font-normal">${item.valeur}</div></td>
+                <td class="px-3 py-3 align-top"><span class="px-2 py-0.5 rounded-full font-bold border ${statusClass}">${item.statut}</span></td>
+                <td class="px-3 py-3 align-top"><p class="mb-1">${item.analyse}</p><div class="text-[10px] italic text-gray-400">"${item.extrait_pc}"</div></td>
+            </tr>`;
+        });
+        container.innerHTML = html + `</tbody></table></div>`;
+    }
+
+    async function callAI(provider, key, prompt) {
+        if (provider === 'anthropic') {
+            const resp = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+                body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4096, messages: [{ role: "user", content: prompt }] })
+            });
+            if (!resp.ok) throw new Error("Erreur API Anthropic");
+            const data = await resp.json();
+            return data.content[0].text;
+        }
+        // Ajout de Gemini pour la complétude
+        if (provider === 'google') {
+            const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+                method: 'POST',
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            });
+            const data = await resp.json();
+            return data.candidates[0].content.parts[0].text;
+        }
+        throw new Error("Fournisseur non configuré");
+    }
+</script>
 </body>
 </html>
